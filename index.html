@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#fff8fb">
+  <meta name="description" content="宝子语录——记录每一个情绪里的你">
+  <title>宝子语录</title>
+  <link rel="icon" type="image/png" href="baozi.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="background-bubble bubble-left"></div>
+  <div class="background-bubble bubble-right"></div>
+
+  <header class="space-topbar">
+    <button class="topbar-brand" id="homeLogoButton" type="button" aria-label="返回首页">
+      <span class="topbar-avatar" id="navProfileAvatar"><span class="avatar-emoji">♡</span></span>
+      <span class="topbar-brand-copy">
+        <strong><span id="navProfileTitle">宝子</span><i>♡</i></strong>
+        <small id="navProfileSubtitle">记录每一个情绪里的你</small>
+      </span>
+    </button>
+    <div class="topbar-actions">
+      <nav class="header-nav" aria-label="空间导航">
+        <button type="button" data-view-link="home">首页</button>
+        <button type="button" data-view-link="favorites">收藏</button>
+        <button type="button" data-view-link="stats">统计</button>
+      </nav>
+      <button class="primary-button header-create-button" id="openNewQuoteViewButton" type="button">＋ 新建语录</button>
+    </div>
+  </header>
+
+  <main class="views-container">
+    <section id="homeView" class="view active" aria-labelledby="homeTitle">
+      <section class="profile-cover" id="profileHeader">
+        <div class="profile-cover-blur" id="profileCoverBlur" aria-hidden="true"></div>
+        <div class="profile-cover-overlay"></div>
+        <div class="cover-decoration cover-star">✦</div>
+        <div class="cover-decoration cover-heart">♡</div>
+        <div class="cover-profile">
+          <span class="profile-avatar" id="profileAvatar"><span class="avatar-emoji">♡</span></span>
+          <div class="cover-profile-copy">
+            <div class="cover-title-line"><h1 id="profileTitle">宝子</h1><span>我的空间</span></div>
+            <p id="profileSubtitle">记录每一个情绪里的你</p>
+            <small id="profileStatus">今天也要好好记录自己</small>
+          </div>
+        </div>
+      </section>
+
+      <div class="dashboard-layout">
+        <aside class="left-column">
+          <section class="app-card overview-card">
+            <div class="card-title"><span>♥</span><h2>我的概览</h2></div>
+            <div class="overview-list">
+              <button id="overviewAllQuotesButton" type="button"><span>全部语录</span><b id="homeQuoteCount">0</b></button>
+              <button id="overviewFavoritesButton" type="button"><span>我的收藏</span><b id="homeFavoriteCount">0</b></button>
+              <div><span>宝子情绪</span><b id="homeEmotionCount">2</b></div>
+            </div>
+          </section>
+
+          <section class="app-card quick-panel">
+            <div class="card-title"><span>☷</span><h2>我的小空间</h2></div>
+            <button class="quick-entry favorites-entry" id="homeFavoritesButton" type="button">
+              <span>♥</span><b>我的收藏</b><small id="quickFavoriteCount">0 条</small><i>›</i>
+            </button>
+            <button class="quick-entry stats-entry" id="homeStatsButton" type="button">
+              <span>☁</span><b>情绪统计</b><small>看看最近的心情天气</small><i>›</i>
+            </button>
+          </section>
+
+          <section class="app-card signature-card">
+            <span>♡</span>
+            <blockquote>愿每一种情绪，<br>都被温柔接住。</blockquote>
+            <p>—— 宝子语录</p>
+          </section>
+        </aside>
+
+        <section class="center-column">
+          <div class="center-intro">
+            <span class="eyebrow">MY MOOD SPACE</span>
+            <h1 id="homeTitle">嗨，今天是哪一种宝子？</h1>
+            <p>选一个情绪，进入属于它的小空间。</p>
+          </div>
+          <section class="app-card emotion-panel">
+            <div class="section-heading">
+              <div><span class="eyebrow">MOOD ENTRANCE</span><h2>我的宝子情绪</h2></div>
+              <button class="text-button" id="homeAllQuotesButton" type="button">查看全部 ›</button>
+            </div>
+            <div class="mood-grid-wrap"><div id="homeEmotionList" class="home-emotion-grid"></div></div>
+          </section>
+        </section>
+
+        <aside class="right-column">
+          <section class="app-card custom-emotion-panel">
+            <div class="card-title"><span>✦</span><h2>新建宝子情绪</h2></div>
+            <p>给那些说不清的小情绪，起一个自己的名字。</p>
+            <span class="emoji-picker-label">选择小表情</span>
+            <div id="customEmojiPicker" class="emoji-picker" aria-label="选择情绪表情"></div>
+            <label class="emoji-picker-label" for="customIconInput">自定义小表情</label>
+            <input id="customIconInput" maxlength="8" placeholder="例如：🥹 / 🤯 / 💗">
+            <div class="emotion-icon-upload">
+              <input class="sr-only" id="customIconUpload" type="file" accept="image/*">
+              <button class="soft-button" id="chooseCustomIconButton" type="button">上传情绪图标</button>
+              <span id="customIconPreview">未选择图片</span>
+            </div>
+            <label class="sr-only" for="customEmotionInput">情绪名称</label>
+            <input id="customEmotionInput" maxlength="24" placeholder="例如：考试崩溃的宝子">
+            <button class="primary-button full-button" id="addEmotionButton" type="button">＋ 添加情绪</button>
+          </section>
+
+          <section class="app-card personality-card">
+            <div class="card-title"><span>♡</span><h2>个性设置</h2></div>
+            <p>自定义顶部个人空间封面和资料，让它更像你。</p>
+            <div class="sidebar-cover-preview" id="sidebarCoverPreview"><span>当前封面</span></div>
+            <input class="sr-only" id="sidebarCoverUpload" type="file" accept="image/*">
+            <div class="personality-actions">
+              <button class="secondary-button" id="uploadSidebarCoverButton" type="button">上传自定义封面</button>
+              <button class="soft-button" id="resetSidebarCoverButton" type="button">恢复默认封面</button>
+              <button class="secondary-button" id="sidebarEditProfileButton" type="button">编辑个人资料</button>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section id="newQuoteView" class="view" aria-labelledby="newQuoteTitle">
+      <div class="page-heading">
+        <button class="back-button" type="button" data-back-home>← 返回首页</button>
+        <h1 id="newQuoteTitle">新建一条宝子语录</h1>
+        <p>把此刻的小心情，认真保存下来。</p>
+      </div>
+      <div class="reference-form-layout">
+        <section class="reference-form">
+          <label class="field-label" for="newQuoteEmotionSelect">选择情绪</label>
+          <select class="form-input" id="newQuoteEmotionSelect"></select>
+          <label class="field-label" for="newQuoteInput">语录内容</label>
+          <textarea id="newQuoteInput" maxlength="500" placeholder="今天的宝子想说什么？"></textarea>
+          <div class="composer-meta">
+            <button class="voice-button" id="newQuoteVoiceButton" type="button">🎤 语音输入</button>
+            <span><b id="newQuoteCharCount">0</b> / 500</span>
+          </div>
+          <label class="field-label" for="newQuoteTagInput">添加标签 <span>选填</span></label>
+          <input class="form-input" id="newQuoteTagInput" maxlength="50" placeholder="例如：学习、生活、考试、朋友">
+          <button class="primary-button reference-submit" id="newQuotePublishButton" type="button">发布到宝子语录 ♡</button>
+          <div id="newQuoteRecentList" class="sr-only"></div>
+        </section>
+        <aside class="app-card writing-note">
+          <h2>写给此刻的自己</h2>
+          <ul><li>不用写很长，真实就好</li><li>可以加标签，方便以后查找</li><li>发布后会进入对应情绪空间</li></ul>
+          <span>♡</span>
+        </aside>
+      </div>
+    </section>
+
+    <section id="emotionView" class="view" aria-labelledby="emotionViewTitle">
+      <div class="emotion-hero">
+        <button class="back-button" type="button" data-back-home>← 返回首页</button>
+        <span class="subview-mark" id="emotionViewMark">🌞</span>
+        <div><h1 id="emotionViewTitle">开心的宝子</h1><p><b id="emotionViewCount">0</b> 条语录</p></div>
+      </div>
+      <div class="emotion-view-layout">
+        <section class="app-card emotion-composer">
+          <h2>对这个宝子说</h2>
+          <p id="emotionComposerHint">把开心的小瞬间留在这里吧</p>
+          <label class="sr-only" for="emotionQuoteInput">语录内容</label>
+          <textarea id="emotionQuoteInput" maxlength="500" placeholder="今天有什么开心的小事想记录吗？"></textarea>
+          <div class="composer-meta">
+            <button class="voice-button" id="emotionVoiceButton" type="button">🎤 语音输入</button>
+            <span><b id="emotionCharCount">0</b> / 500</span>
+          </div>
+          <label class="field-label" for="emotionTagInput">添加标签 <span>选填</span></label>
+          <input class="form-input" id="emotionTagInput" maxlength="50" placeholder="例如：学习、生活、考试、朋友">
+          <button class="primary-button publish-button" id="emotionPublishButton" type="button">发布到开心的宝子 ♡</button>
+        </section>
+        <section class="app-card emotion-feed">
+          <div class="feed-title"><h2 id="emotionFeedTitle">开心的宝子语录</h2></div>
+          <div id="emotionQuoteList" class="quote-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="allQuotesView" class="view" aria-labelledby="allQuotesTitle">
+      <div class="page-heading compact-page-heading">
+        <button class="back-button" type="button" data-back-home>← 返回首页</button>
+        <h1 id="allQuotesTitle">全部宝子语录</h1>
+      </div>
+      <div class="all-quotes-toolbar">
+        <div id="allQuotesFilters" class="filter-chips"></div>
+        <div class="search-box">
+          <span>⌕</span><label class="sr-only" for="allQuotesSearchInput">搜索语录</label>
+          <input id="allQuotesSearchInput" type="search" placeholder="搜索语录、标签或情绪">
+          <button id="clearAllQuotesSearchButton" type="button" aria-label="清空搜索">×</button>
+        </div>
+        <span id="allQuotesCount">0 条语录</span>
+      </div>
+      <div id="allQuoteList" class="quote-list wide-quote-list"></div>
+    </section>
+
+    <section id="favoritesView" class="view" aria-labelledby="favoritesTitle">
+      <div class="page-heading compact-page-heading">
+        <button class="back-button" type="button" data-back-home>← 返回首页</button>
+        <h1 id="favoritesTitle">舍不得忘记的话 ♡</h1>
+      </div>
+      <div class="favorites-layout">
+        <div id="favoriteQuoteList" class="quote-list"></div>
+        <aside class="app-card favorites-guide">
+          <span>♡</span><p>还没有收藏的语录。</p>
+          <div>
+            <button class="primary-button" data-empty-new-quote type="button">去记录一句</button>
+            <button class="secondary-button" data-empty-all-quotes type="button">查看全部语录</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="statsView" class="view" aria-labelledby="statsTitle">
+      <div class="page-heading compact-page-heading">
+        <button class="back-button" type="button" data-back-home>← 返回首页</button>
+        <h1 id="statsTitle">最近的心情天气 ♡</h1>
+      </div>
+      <div class="stats-summary">
+        <div class="summary-card"><span>今日记录</span><b id="statsTodayCount">0</b><small>条</small></div>
+        <div class="summary-card"><span>本周记录</span><b id="statsWeekCount">0</b><small>条</small></div>
+        <div class="summary-card"><span>总语录</span><b id="statsTotalCount">0</b><small>条</small></div>
+        <div class="summary-card"><span>收藏数量</span><b id="statsFavoriteCount">0</b><small>条</small></div>
+        <div class="summary-card"><span>最常出现情绪</span><b id="topEmotionName">暂无</b><small id="topEmotionCount">暂无</small></div>
+        <div class="summary-card"><span>最常用标签</span><b id="topTagName">暂无</b><small id="topTagCount">暂无</small></div>
+      </div>
+      <section class="stats-detail-card">
+        <div class="card-title"><span>☷</span><h2>情绪分布</h2></div>
+        <div id="statsDetailList" class="stats-detail-list"></div>
+      </section>
+    </section>
+
+    <section id="profileSettingsView" class="view" aria-labelledby="profileSettingsViewTitle">
+      <div class="page-heading compact-page-heading">
+        <button class="back-button" id="backFromAvatar" type="button">← 返回首页</button>
+        <h1 id="profileSettingsViewTitle">个人空间设置</h1>
+      </div>
+      <div class="profile-settings-layout">
+        <section class="app-card settings-avatar-card">
+          <h2>头像设置</h2>
+          <div class="avatar-preview" id="avatarPreview"><span>♡</span></div>
+          <span class="settings-label">默认头像</span>
+          <div id="avatarOptions" class="avatar-options-grid"></div>
+          <input class="sr-only" id="avatarUpload" type="file" accept="image/*">
+          <div class="avatar-setting-actions">
+            <button class="primary-button" id="chooseAvatarUploadButton" type="button">上传头像</button>
+            <button class="soft-button" id="cancelAvatarSelectionButton" type="button">取消选择</button>
+            <button class="secondary-button" id="resetDefaultAvatarButton" type="button">恢复默认头像</button>
+          </div>
+        </section>
+
+        <section class="app-card settings-cover-card">
+          <h2>封面设置</h2>
+          <div class="cover-preview" id="coverPreview">
+            <div class="cover-preview-blur" id="coverPreviewBlur" aria-hidden="true"></div>
+            <div class="cover-preview-shade"></div><span>当前封面</span>
+          </div>
+          <span class="settings-label">封面显示方式</span>
+          <div class="cover-mode-options" id="coverModeOptions">
+            <button type="button" data-cover-mode="cover">铺满</button>
+            <button type="button" data-cover-mode="contain">完整显示</button>
+            <button type="button" data-cover-mode="blur">模糊背景</button>
+          </div>
+          <input class="sr-only" id="coverUpload" type="file" accept="image/*">
+          <div class="cover-actions">
+            <button class="primary-button" id="chooseCoverUploadButton" type="button">上传封面图片</button>
+            <button class="secondary-button" id="defaultCoverButton" type="button">恢复默认封面</button>
+          </div>
+        </section>
+
+        <section class="app-card settings-text-card">
+          <h2>文字资料设置</h2>
+          <label class="field-label" for="profileTitleInput">昵称</label>
+          <input class="form-input" id="profileTitleInput" maxlength="30" value="宝子">
+          <label class="field-label" for="profileSubtitleInput">副标题</label>
+          <input class="form-input" id="profileSubtitleInput" maxlength="60" value="记录每一个情绪里的你">
+          <label class="field-label" for="profileStatusInput">今日状态</label>
+          <input class="form-input" id="profileStatusInput" maxlength="60" value="今天也要好好记录自己">
+          <div class="avatar-actions">
+            <button class="secondary-button" id="avatarBackButton" type="button">取消</button>
+            <button class="primary-button" id="saveAvatarButton" type="button">保存个人资料 ♡</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="editQuoteView" class="view" aria-labelledby="editQuoteTitle">
+      <div class="page-heading">
+        <button class="back-button" id="cancelEditTopButton" type="button">← 返回上一页</button>
+        <h1 id="editQuoteTitle">编辑宝子语录</h1>
+        <p>修改你此刻的一句话。</p>
+      </div>
+      <div class="edit-reference-layout">
+        <section class="reference-form edit-quote-card">
+          <label class="field-label" for="editEmotionSelect">选择情绪</label>
+          <select class="form-input" id="editEmotionSelect"></select>
+          <label class="field-label" for="editQuoteInput">语录内容</label>
+          <textarea id="editQuoteInput" maxlength="500"></textarea>
+          <div class="composer-meta"><span></span><span><b id="editCharCount">0</b> / 500</span></div>
+          <label class="field-label" for="editTagInput">添加标签 <span>选填</span></label>
+          <input class="form-input" id="editTagInput" maxlength="50" placeholder="例如：学习、生活、考试、朋友">
+          <div class="edit-actions">
+            <button class="secondary-button" id="cancelEditButton" type="button">取消编辑</button>
+            <button class="primary-button" id="saveEditButton" type="button">保存修改</button>
+          </div>
+        </section>
+        <aside class="app-card edit-preview-card">
+          <span class="eyebrow">预览</span>
+          <p id="editPreviewText">修改后的语录会显示在这里。</p>
+          <div id="editPreviewMeta"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer>♡ 愿每一种情绪，都被温柔接住 · 宝子语录</footer>
+
+  <div class="custom-confirm" id="customConfirm" aria-hidden="true">
+    <div class="confirm-backdrop" data-confirm-cancel></div>
+    <section class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <div class="confirm-heart">♡</div>
+      <h2 id="confirmTitle">确定要删除吗？</h2>
+      <p id="confirmMessage">删除后就不能恢复啦。</p>
+      <div class="confirm-actions">
+        <button class="secondary-button" id="confirmCancelButton" type="button">取消</button>
+        <button class="danger-button" id="confirmDeleteButton" type="button">确定删除</button>
+      </div>
+    </section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>
