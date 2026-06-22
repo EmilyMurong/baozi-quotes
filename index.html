@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#fff8fb">
+  <meta name="theme-color" content="#ff8fab">
   <meta name="description" content="宝子语录——记录每一个情绪里的你">
   <title>宝子语录</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="baozi.png">
   <link rel="icon" type="image/png" href="baozi.png">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -15,17 +17,21 @@
 
   <header class="space-topbar">
     <button class="topbar-brand" id="homeLogoButton" type="button" aria-label="返回首页">
+      <img class="mobile-brand-logo" src="baozi.png" alt="">
       <span class="topbar-avatar" id="navProfileAvatar"><span class="avatar-emoji">♡</span></span>
       <span class="topbar-brand-copy">
         <strong><span id="navProfileTitle">宝子</span><i>♡</i></strong>
         <small id="navProfileSubtitle">记录每一个情绪里的你</small>
       </span>
+      <span class="mobile-brand-title">宝子语录</span>
     </button>
     <div class="topbar-actions">
       <nav class="header-nav" aria-label="空间导航">
         <button type="button" data-view-link="home">首页</button>
-        <button type="button" data-view-link="favorites">收藏</button>
+        <button class="desktop-favorites-nav" type="button" data-view-link="favorites">收藏</button>
+        <button class="tablet-nav-item" type="button" data-view-link="allQuotes">语录</button>
         <button type="button" data-view-link="stats">统计</button>
+        <button class="tablet-nav-item" type="button" data-view-link="profileSettings">我的</button>
       </nav>
       <button class="primary-button header-create-button" id="openNewQuoteViewButton" type="button">＋ 新建语录</button>
     </div>
@@ -89,10 +95,15 @@
             </div>
             <div class="mood-grid-wrap"><div id="homeEmotionList" class="home-emotion-grid"></div></div>
           </section>
+          <button class="primary-button mobile-home-create" type="button" data-mobile-new-quote>＋ 新建宝子语录</button>
         </section>
 
         <aside class="right-column">
-          <section class="app-card custom-emotion-panel">
+          <button class="mobile-emotion-toggle" id="mobileEmotionToggle" type="button"
+            aria-expanded="false" aria-controls="customEmotionPanel">
+            <span>＋ 新建宝子情绪</span><i>⌄</i>
+          </button>
+          <section class="app-card custom-emotion-panel" id="customEmotionPanel">
             <div class="card-title"><span>✦</span><h2>新建宝子情绪</h2></div>
             <p>给那些说不清的小情绪，起一个自己的名字。</p>
             <span class="emoji-picker-label">选择小表情</span>
@@ -118,6 +129,14 @@
               <button class="secondary-button" id="uploadSidebarCoverButton" type="button">上传自定义封面</button>
               <button class="soft-button" id="resetSidebarCoverButton" type="button">恢复默认封面</button>
               <button class="secondary-button" id="sidebarEditProfileButton" type="button">编辑个人资料</button>
+            </div>
+          </section>
+
+          <section class="app-card tablet-today-card">
+            <span>♡</span>
+            <div>
+              <h2>今日提示</h2>
+              <p>不必急着整理好所有情绪，先认真记下此刻就很好。</p>
             </div>
           </section>
         </aside>
@@ -317,6 +336,14 @@
   </main>
 
   <footer>♡ 愿每一种情绪，都被温柔接住 · 宝子语录</footer>
+
+  <nav class="mobile-tab-bar" aria-label="手机端主导航">
+    <button type="button" data-mobile-tab="home" aria-label="首页"><span>⌂</span><small>首页</small></button>
+    <button type="button" data-mobile-tab="quotes" aria-label="语录"><span>♡</span><small>语录</small></button>
+    <button class="mobile-tab-create" type="button" data-mobile-tab="newQuote" aria-label="新建语录"><span>＋</span><small>新建</small></button>
+    <button type="button" data-mobile-tab="stats" aria-label="统计"><span>⌁</span><small>统计</small></button>
+    <button type="button" data-mobile-tab="profileSettings" aria-label="我的"><span>♙</span><small>我的</small></button>
+  </nav>
 
   <div class="custom-confirm" id="customConfirm" aria-hidden="true">
     <div class="confirm-backdrop" data-confirm-cancel></div>

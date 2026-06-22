@@ -56,7 +56,8 @@ function cacheElements() {
     "navProfileAvatar", "navProfileTitle", "navProfileSubtitle",
     "openNewQuoteViewButton", "homeAllQuotesButton", "homeQuoteCount", "homeFavoriteCount",
     "homeEmotionCount", "homeEmotionList", "customEmojiPicker", "customIconInput", "customIconUpload",
-    "chooseCustomIconButton", "customIconPreview", "customEmotionInput", "addEmotionButton", "homeFavoritesButton",
+    "chooseCustomIconButton", "customIconPreview", "customEmotionInput", "addEmotionButton", "mobileEmotionToggle",
+    "customEmotionPanel", "homeFavoritesButton",
     "homeStatsButton", "overviewAllQuotesButton", "overviewFavoritesButton", "quickFavoriteCount",
     "sidebarCoverPreview", "sidebarCoverUpload", "uploadSidebarCoverButton", "resetSidebarCoverButton", "sidebarEditProfileButton",
     "newQuoteEmotionSelect", "newQuoteInput", "newQuoteVoiceButton", "newQuoteCharCount",
@@ -78,6 +79,7 @@ function cacheElements() {
   ids.forEach((id) => { elements[id] = document.getElementById(id); });
   elements.views = [...document.querySelectorAll(".view")];
   elements.navButtons = [...document.querySelectorAll("[data-view-link]")];
+  elements.mobileTabButtons = [...document.querySelectorAll("[data-mobile-tab]")];
 }
 
 function safeArray(key) {
@@ -177,11 +179,23 @@ function saveProfile(showMessage = false) {
 }
 
 function saveQuotes() {
-  localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes));
+  try {
+    localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes));
+    return true;
+  } catch {
+    showToast("保存失败，本地存储空间可能已满。");
+    return false;
+  }
 }
 
 function saveEmotions() {
-  localStorage.setItem(EMOTIONS_KEY, JSON.stringify(customEmotions));
+  try {
+    localStorage.setItem(EMOTIONS_KEY, JSON.stringify(customEmotions));
+    return true;
+  } catch {
+    showToast("情绪保存失败，本地存储空间可能已满。");
+    return false;
+  }
 }
 
 function escapeHTML(value = "") {
@@ -227,6 +241,21 @@ function setActiveView(viewName) {
   currentView = viewName;
   elements.views.forEach((view) => view.classList.toggle("active", view.id === `${viewName}View`));
   elements.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.viewLink === viewName));
+  const mobileSection = viewName === "home"
+    ? "home"
+    : viewName === "newQuote"
+      ? "newQuote"
+      : viewName === "stats"
+        ? "stats"
+        : viewName === "profileSettings"
+          ? "profileSettings"
+          : "quotes";
+  elements.mobileTabButtons.forEach((button) => {
+    const active = button.dataset.mobileTab === mobileSection;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
 }
@@ -234,6 +263,9 @@ function setActiveView(viewName) {
 function showHomeView() {
   if (currentView === "profileSettings") discardProfileDraft();
   currentEmotion = null;
+  if (elements.mobileEmotionToggle && window.matchMedia("(max-width: 600px)").matches) {
+    setMobileEmotionPanel(false);
+  }
   renderHome();
   setActiveView("home");
 }
@@ -368,11 +400,16 @@ function renderCover(profileData, target, blurLayer = null) {
     : "";
   const mode = ["cover", "contain", "blur"].includes(profileData.coverMode) ? profileData.coverMode : "cover";
   target.dataset.coverMode = mode;
-  target.style.backgroundImage = image && (mode !== "blur" || !blurLayer) ? image : "";
+  target.style.backgroundImage = image;
   target.style.backgroundSize = image && mode === "contain" ? "contain" : "";
   target.style.backgroundPosition = "center";
   target.style.backgroundRepeat = "no-repeat";
   if (blurLayer) blurLayer.style.backgroundImage = image;
+}
+
+function setMobileEmotionPanel(open) {
+  elements.customEmotionPanel.classList.toggle("mobile-open", open);
+  elements.mobileEmotionToggle.setAttribute("aria-expanded", String(open));
 }
 
 function renderAvatarOptions() {
@@ -838,8 +875,12 @@ function addQuote() {
     elements.emotionQuoteInput.focus();
     return;
   }
-  quotes.unshift(createQuote(text, currentEmotion, elements.emotionTagInput.value.trim()));
-  saveQuotes();
+  const quote = createQuote(text, currentEmotion, elements.emotionTagInput.value.trim());
+  quotes.unshift(quote);
+  if (!saveQuotes()) {
+    quotes = quotes.filter((item) => item.id !== quote.id);
+    return;
+  }
   elements.emotionQuoteInput.value = "";
   elements.emotionTagInput.value = "";
   updateCharCount("emotion");
@@ -855,8 +896,12 @@ function addQuoteFromNewView() {
     return;
   }
   const emotion = elements.newQuoteEmotionSelect.value;
-  quotes.unshift(createQuote(text, emotion, elements.newQuoteTagInput.value.trim()));
-  saveQuotes();
+  const quote = createQuote(text, emotion, elements.newQuoteTagInput.value.trim());
+  quotes.unshift(quote);
+  if (!saveQuotes()) {
+    quotes = quotes.filter((item) => item.id !== quote.id);
+    return;
+  }
   elements.newQuoteInput.value = "";
   elements.newQuoteTagInput.value = "";
   updateCharCount("newQuote");
@@ -872,10 +917,14 @@ function saveEditedQuote() {
     elements.editQuoteInput.focus();
     return;
   }
+  const previousQuote = { ...quote };
   quote.text = text;
   quote.tag = elements.editTagInput.value.trim();
   quote.emotion = elements.editEmotionSelect.value;
-  saveQuotes();
+  if (!saveQuotes()) {
+    Object.assign(quote, previousQuote);
+    return;
+  }
   const updatedEmotion = quote.emotion;
   editingQuoteId = null;
   showToast("宝子语录已经修改好啦。");
@@ -889,8 +938,12 @@ function deleteQuote(id) {
     confirmText: "确定删除",
     cancelText: "取消",
     onConfirm: () => {
+      const previousQuotes = quotes;
       quotes = quotes.filter((quote) => quote.id !== id);
-      saveQuotes();
+      if (!saveQuotes()) {
+        quotes = previousQuotes;
+        return;
+      }
       renderAll();
       showToast("宝子语录已经删除。");
     }
@@ -901,7 +954,10 @@ function toggleFavorite(id) {
   const quote = quotes.find((item) => item.id === id);
   if (!quote) return;
   quote.favorite = !quote.favorite;
-  saveQuotes();
+  if (!saveQuotes()) {
+    quote.favorite = !quote.favorite;
+    return;
+  }
   renderAll();
   showToast(quote.favorite ? "已加入收藏。" : "已取消收藏。");
 }
@@ -922,12 +978,16 @@ function addCustomEmotion() {
     ? { iconType: "image", iconValue: customIconImage }
     : { iconType: "emoji", iconValue: customSymbol || selectedCustomEmoji };
   customEmotions.push({ name, ...icon });
-  saveEmotions();
+  if (!saveEmotions()) {
+    customEmotions.pop();
+    return;
+  }
   elements.customEmotionInput.value = "";
   elements.customIconInput.value = "";
   customIconImage = "";
   elements.customIconPreview.textContent = "未选择图片";
   renderHome();
+  if (window.matchMedia("(max-width: 600px)").matches) setMobileEmotionPanel(false);
   showToast("新的宝子情绪添加成功。");
 }
 
@@ -940,6 +1000,7 @@ function saveProfileSettings() {
     elements.profileTitleInput.focus();
     return;
   }
+  const previousProfile = { ...profile };
   profile = {
     ...profileDraft,
     title,
@@ -948,6 +1009,8 @@ function saveProfileSettings() {
   };
   if (saveProfile(true)) {
     showHomeView();
+  } else {
+    profile = previousProfile;
   }
 }
 
@@ -962,8 +1025,12 @@ function deleteCustomEmotion(emotion) {
     confirmText: "确定删除",
     cancelText: "取消",
     onConfirm: () => {
+      const previousEmotions = customEmotions;
       customEmotions = customEmotions.filter((item) => item.name !== emotion);
-      saveEmotions();
+      if (!saveEmotions()) {
+        customEmotions = previousEmotions;
+        return;
+      }
       renderHome();
       showToast("自定义情绪已经删除，旧语录会继续保留。");
     }
@@ -1058,11 +1125,29 @@ function bindEvents() {
       const view = button.dataset.viewLink;
       if (view === "home") showHomeView();
       if (view === "favorites") showFavoritesView();
+      if (view === "allQuotes") showAllQuotesView();
       if (view === "stats") showStatsView();
+      if (view === "profileSettings") showProfileSettingsView();
     });
   });
 
   elements.openNewQuoteViewButton.addEventListener("click", showNewQuoteView);
+  document.querySelectorAll("[data-mobile-new-quote]").forEach((button) => {
+    button.addEventListener("click", showNewQuoteView);
+  });
+  elements.mobileTabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.mobileTab;
+      if (view === "home") showHomeView();
+      if (view === "quotes") showAllQuotesView();
+      if (view === "newQuote") showNewQuoteView();
+      if (view === "stats") showStatsView();
+      if (view === "profileSettings") showProfileSettingsView();
+    });
+  });
+  elements.mobileEmotionToggle.addEventListener("click", () => {
+    setMobileEmotionPanel(elements.mobileEmotionToggle.getAttribute("aria-expanded") !== "true");
+  });
   elements.backFromAvatar.addEventListener("click", showHomeView);
   elements.avatarBackButton.addEventListener("click", showHomeView);
   elements.saveAvatarButton.addEventListener("click", saveProfileSettings);
@@ -1087,9 +1172,10 @@ function bindEvents() {
   elements.uploadSidebarCoverButton.addEventListener("click", () => elements.sidebarCoverUpload.click());
   elements.sidebarCoverUpload.addEventListener("change", handleSidebarCoverUpload);
   elements.resetSidebarCoverButton.addEventListener("click", () => {
+    const previousProfile = { ...profile };
     profile = { ...profile, coverType: "default", coverValue: "default", coverMode: "cover" };
-    saveProfile();
-    showToast("已经恢复默认顶部封面。");
+    if (saveProfile()) showToast("已经恢复默认顶部封面。");
+    else profile = previousProfile;
   });
   elements.profileTitleInput.addEventListener("input", () => {
     profileDraft.title = elements.profileTitleInput.value;
@@ -1223,3 +1309,11 @@ document.addEventListener("DOMContentLoaded", () => {
   updateCharCount("edit");
   setActiveView("home");
 });
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch((error) => {
+      console.error("Service Worker 注册失败：", error);
+    });
+  });
+}
