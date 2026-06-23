@@ -1,4 +1,4 @@
-const CACHE_NAME = "baozi-cache-v1";
+const CACHE_NAME = "baozi-cache-v9";
 const APP_SHELL = [
   "./",
   "./index.html",

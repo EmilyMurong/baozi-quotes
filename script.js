@@ -7,6 +7,25 @@ const emojiOptions = ["🌞", "☔", "🌸", "😭", "😡", "💤", "📚", "�
 const QUOTES_KEY = "baozi_quotes";
 const EMOTIONS_KEY = "baozi_emotions";
 const PROFILE_KEY = "baozi_profile";
+const AUTH_KEY = "baozi_supabase_session";
+const DELETED_QUOTES_KEY = "baozi_deleted_quote_ids";
+const DELETED_EMOTIONS_KEY = "baozi_deleted_emotion_ids";
+const SUPABASE_URL = "https://ifmiisaxfabviztixdex.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_1wuJIe0OFFqMODfZNwy_mw_vO6z35rj";
+const CLOUD_COLUMNS = {
+  profile: {
+    user: "id", title: "title", subtitle: "subtitle", status: "status",
+    avatarType: "avatar_type", avatarValue: "avatar_value",
+    coverType: "cover_type", coverValue: "cover_value", coverMode: "cover_mode"
+  },
+  emotion: {
+    id: "id", user: "user_id", name: "name", iconType: "icon_type", iconValue: "icon_value"
+  },
+  quote: {
+    id: "id", user: "user_id", text: "text", emotion: "emotion",
+    tag: "tag", favorite: "favorite", createdAt: "created_at"
+  }
+};
 const defaultProfile = {
   avatarType: "emoji",
   avatarValue: "♡",
@@ -44,6 +63,13 @@ let profileDraft = { ...defaultProfile };
 let temporaryAvatarSelection = null;
 let confirmCallback = null;
 let toastTimer;
+let authSession = null;
+let currentUser = null;
+let syncInProgress = false;
+let syncTimer = null;
+let authMode = "login";
+let rememberSession = true;
+let authRestorePromise = null;
 const elements = {};
 
 const allEmotionRecords = () => [...defaultEmotionData, ...customEmotions];
@@ -62,7 +88,7 @@ function cacheElements() {
     "sidebarCoverPreview", "sidebarCoverUpload", "uploadSidebarCoverButton", "resetSidebarCoverButton", "sidebarEditProfileButton",
     "newQuoteEmotionSelect", "newQuoteInput", "newQuoteVoiceButton", "newQuoteCharCount",
     "newQuoteTagInput", "newQuotePublishButton", "newQuoteRecentList",
-    "emotionViewMark", "emotionViewTitle", "emotionViewCount", "emotionComposerHint",
+    "emotionViewMark", "emotionViewTitle", "emotionViewCount", "emotionViewFavoriteCount", "emotionComposerHint",
     "emotionQuoteInput", "emotionVoiceButton", "emotionCharCount", "emotionTagInput",
     "emotionPublishButton", "emotionFeedTitle", "emotionQuoteList", "allQuotesSearchInput",
     "clearAllQuotesSearchButton", "allQuotesFilters", "allQuotesCount", "allQuoteList", "favoriteQuoteList",
@@ -74,7 +100,13 @@ function cacheElements() {
     "coverPreview", "coverPreviewBlur", "coverModeOptions", "coverUpload", "defaultCoverButton", "chooseCoverUploadButton",
     "profileTitleInput", "profileSubtitleInput", "profileStatusInput",
     "editPreviewText", "editPreviewMeta",
-    "customConfirm", "confirmTitle", "confirmMessage", "confirmCancelButton", "confirmDeleteButton", "toast"
+    "customConfirm", "confirmTitle", "confirmMessage", "confirmCancelButton", "confirmDeleteButton",
+    "accountButton", "accountButtonLabel", "syncStatus", "accountSettingsTitle", "accountSettingsText",
+    "profileLoginButton", "profileSyncButton", "profileLogoutButton",
+    "welcomeView", "welcomeStartButton", "welcomeLoginButton",
+    "authView", "authTitle", "authEmailInput", "authPasswordInput", "authMessage",
+    "passwordToggleButton", "rememberMeInput", "forgotPasswordButton", "authOptions",
+    "authSwitchPrompt", "authEmailNote", "registerButton", "loginButton", "toast"
   ];
   ids.forEach((id) => { elements[id] = document.getElementById(id); });
   elements.views = [...document.querySelectorAll(".view")];
@@ -101,9 +133,11 @@ function normalizeCustomEmotion(item, index) {
       ? "image"
       : "emoji";
     return {
+      id: String(item.id || `local-${index}-${item.name || "emotion"}`),
       name: String(item.name || "").trim(),
       iconType,
-      iconValue: iconType === "image" ? item.iconValue : String(item.iconValue || legacyEmoji || "🌸")
+      iconValue: iconType === "image" ? item.iconValue : String(item.iconValue || legacyEmoji || "🌸"),
+      ...(item._sync ? { _sync: item._sync } : {})
     };
   }
   return { name: "", iconType: "emoji", iconValue: "🌸" };
@@ -112,11 +146,12 @@ function normalizeCustomEmotion(item, index) {
 function loadData() {
   quotes = safeArray(QUOTES_KEY).map((quote) => {
     if (quote.date && quote.time && !String(quote.date).includes("T")) {
-      return { ...quote, favorite: Boolean(quote.favorite) };
+      return { ...quote, id: String(quote.id), favorite: Boolean(quote.favorite) };
     }
     const legacyDate = new Date(quote.date || Date.now());
     return {
       ...quote,
+      id: String(quote.id),
       date: Number.isNaN(legacyDate.getTime()) ? String(quote.date || "") : toDateString(legacyDate),
       time: Number.isNaN(legacyDate.getTime()) ? "" : toTimeString(legacyDate),
       favorite: Boolean(quote.favorite)
@@ -195,6 +230,619 @@ function saveEmotions() {
   } catch {
     showToast("情绪保存失败，本地存储空间可能已满。");
     return false;
+  }
+}
+
+function safeJSON(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveDeletedId(key, id) {
+  if (!id || String(id).startsWith("local-")) return;
+  const ids = [...new Set([...safeJSON(key, []), String(id)])];
+  localStorage.setItem(key, JSON.stringify(ids));
+}
+
+function clearCloudDataFlags() {
+  quotes = quotes.map(({ _sync, ...quote }) => quote);
+  customEmotions = customEmotions.map(({ _sync, ...emotion }) => emotion);
+  saveQuotes();
+  saveEmotions();
+}
+
+function readableErrorDetails(error) {
+  return [
+    error?.message,
+    error?.code,
+    error?.error,
+    error?.error_description,
+    error?.msg,
+    error?.details,
+    error?.hint
+  ].filter(Boolean).join(" ");
+}
+
+function authErrorMessage(error) {
+  const message = readableErrorDetails(error);
+  const status = Number(error?.status || 0);
+  if (
+    error?.isNetworkError ||
+    /failed to fetch|fetch failed|networkerror|network request failed|load failed|internet disconnected|offline/i.test(message)
+  ) return "网络连接失败，请检查网络后再试。";
+  if (
+    status === 429 ||
+    /rate limit|too many requests|request rate|over_email_send_rate_limit|email rate limit|security purposes|too frequent/i.test(message)
+  ) return "操作太频繁，请稍后再试。";
+  if (
+    status >= 500 ||
+    /service unavailable|temporarily unavailable|bad gateway|gateway timeout|upstream|database unavailable/i.test(message)
+  ) return "服务暂时不可用，请稍后再试。";
+  if (/email not confirmed|email_not_confirmed|unconfirmed/i.test(message)) {
+    return "请先去邮箱确认账号，再回来登录。";
+  }
+  if (
+    /user already registered|already been registered|already exists|email_exists|user_already_exists|duplicate/i.test(message)
+  ) return "这个邮箱已经注册过，请直接登录。";
+  if (
+    /user not found|user_not_found|no user|account.*not found|email.*not found|does not exist|not registered/i.test(message)
+  ) return "这个邮箱还没有注册，请先注册账号。";
+  if (
+    /invalid email|email address.*invalid|email format|validation_failed.*email|unable to validate email/i.test(message)
+  ) return "请输入正确的邮箱地址。";
+  if (
+    /password/i.test(message) &&
+    /at least 6|less than 6|6 characters|too short|weak|length/i.test(message)
+  ) return "密码至少需要 6 位。";
+  if (/invalid login credentials|invalid credentials|invalid password|wrong password|bad password|invalid_grant/i.test(message)) {
+    return "邮箱或密码错误，请重新输入。";
+  }
+  return "操作失败，请稍后再试。";
+}
+
+function cloudErrorMessage(error) {
+  const message = readableErrorDetails(error);
+  const status = Number(error?.status || 0);
+  if (error?.isNetworkError || /failed to fetch|fetch failed|network/i.test(message)) {
+    return "网络连接失败，请检查网络后再试。";
+  }
+  if (status === 429 || /rate limit|too many requests/i.test(message)) return "操作太频繁，请稍后再试。";
+  if (status >= 500 || /service unavailable|bad gateway|gateway timeout/i.test(message)) {
+    return "服务暂时不可用，请稍后再试。";
+  }
+  return "云端操作失败，请稍后再试。";
+}
+
+async function supabaseRequest(path, options = {}) {
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    "Content-Type": "application/json",
+    ...options.headers
+  };
+  if (options.auth !== false && authSession?.access_token) {
+    await refreshSessionIfNeeded();
+    headers.Authorization = `Bearer ${authSession.access_token}`;
+  }
+  let response;
+  try {
+    response = await fetch(`${SUPABASE_URL}${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
+  } catch (cause) {
+    const requestError = new Error("Supabase request failed");
+    requestError.isNetworkError = true;
+    requestError.cause = cause;
+    throw requestError;
+  }
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  if (!response.ok) {
+    const requestError = new Error("Supabase request rejected");
+    requestError.status = response.status;
+    if (data && typeof data === "object") Object.assign(requestError, data);
+    else requestError.details = String(data || "");
+    throw requestError;
+  }
+  return data;
+}
+
+function storeSession(session) {
+  authSession = session?.access_token ? {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_at: session.expires_at || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600),
+    user: session.user || null
+  } : null;
+  localStorage.removeItem(AUTH_KEY);
+  sessionStorage.removeItem(AUTH_KEY);
+  if (authSession) {
+    const storage = rememberSession ? localStorage : sessionStorage;
+    storage.setItem(AUTH_KEY, JSON.stringify(authSession));
+  }
+  currentUser = authSession?.user || null;
+}
+
+async function refreshSessionIfNeeded(force = false) {
+  if (!authSession?.refresh_token) return;
+  const expiresSoon = Number(authSession.expires_at || 0) * 1000 < Date.now() + 60000;
+  if (!force && !expiresSoon) return;
+  const refreshed = await supabaseRequest("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST",
+    auth: false,
+    body: { refresh_token: authSession.refresh_token }
+  });
+  storeSession(refreshed);
+}
+
+function setAuthBusy(busy) {
+  [elements.loginButton, elements.registerButton, elements.forgotPasswordButton].forEach((button) => {
+    if (button) button.disabled = busy;
+  });
+}
+
+function showAuthMessage(message = "", state = "error") {
+  elements.authMessage.textContent = message;
+  if (message) elements.authMessage.dataset.state = state;
+  else delete elements.authMessage.dataset.state;
+}
+
+function openAuthDialog() {
+  showAuthMessage();
+  document.body.classList.remove("welcome-active", "authenticated", "auth-pending");
+  document.body.classList.add("auth-required");
+  elements.welcomeView.setAttribute("aria-hidden", "true");
+  elements.authView.removeAttribute("aria-hidden");
+  setTimeout(() => elements.authEmailInput.focus(), 20);
+}
+
+function closeAuthDialog() {
+  if (!currentUser) return;
+  document.body.classList.remove("welcome-active", "auth-required", "auth-pending");
+  document.body.classList.add("authenticated");
+  elements.welcomeView.setAttribute("aria-hidden", "true");
+  elements.authView.setAttribute("aria-hidden", "true");
+}
+
+function showWelcomeView() {
+  document.body.classList.remove("auth-pending", "auth-required", "authenticated");
+  document.body.classList.add("welcome-active");
+  elements.welcomeView.removeAttribute("aria-hidden");
+  elements.authView.setAttribute("aria-hidden", "true");
+}
+
+function showAuthenticatedHome() {
+  if (!currentUser || !authSession?.access_token) {
+    openAuthDialog();
+    return;
+  }
+  showHomeView();
+  closeAuthDialog();
+}
+
+function renderAccountState() {
+  const email = currentUser?.email || authSession?.user?.email || "";
+  const loggedIn = Boolean(authSession?.access_token && email);
+  elements.accountButtonLabel.textContent = loggedIn ? email : "登录 / 同步";
+  elements.syncStatus.textContent = syncInProgress ? "正在同步…" : loggedIn ? "云端已连接" : "本地模式";
+  elements.accountButton.classList.toggle("syncing", syncInProgress);
+  elements.accountSettingsTitle.textContent = loggedIn ? `已登录：${email}` : "登录后开启多设备同步";
+  elements.accountSettingsText.textContent = loggedIn
+    ? "资料、情绪和语录会同步到这个账号；在其他设备登录同一邮箱即可读取。"
+    : "当前数据保存在这台设备。登录后会读取并同步你的云端资料、情绪和语录。";
+  elements.profileLoginButton.hidden = loggedIn;
+  elements.profileSyncButton.hidden = !loggedIn;
+  elements.profileLogoutButton.hidden = !loggedIn;
+  if (document.body.classList.contains("welcome-active")) return;
+  document.body.classList.remove("auth-pending", loggedIn ? "auth-required" : "authenticated");
+  document.body.classList.add(loggedIn ? "authenticated" : "auth-required");
+  elements.welcomeView.setAttribute("aria-hidden", "true");
+  elements.authView.toggleAttribute("aria-hidden", loggedIn);
+  if (!loggedIn) setAuthMode("login");
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "register" ? "register" : "login";
+  const registering = authMode === "register";
+  elements.authTitle.textContent = registering ? "注册账号" : "邮箱登录";
+  elements.loginButton.textContent = registering ? "注册" : "登录";
+  elements.authSwitchPrompt.textContent = registering ? "已有账号？" : "还没有账号？";
+  elements.registerButton.textContent = registering ? "去登录" : "注册账号";
+  elements.authEmailNote.textContent = registering
+    ? "注册后请查收邮箱验证链接"
+    : "登录后自动同步你的语录与个人资料";
+  elements.authPasswordInput.autocomplete = registering ? "new-password" : "current-password";
+  elements.authOptions.hidden = registering;
+  showAuthMessage();
+}
+
+function togglePasswordVisibility() {
+  const visible = elements.authPasswordInput.type === "text";
+  elements.authPasswordInput.type = visible ? "password" : "text";
+  elements.passwordToggleButton.textContent = visible ? "◉" : "◎";
+  elements.passwordToggleButton.setAttribute("aria-label", visible ? "显示密码" : "隐藏密码");
+  elements.passwordToggleButton.setAttribute("aria-pressed", String(!visible));
+}
+
+function authCredentials() {
+  return {
+    email: elements.authEmailInput.value.trim(),
+    password: elements.authPasswordInput.value
+  };
+}
+
+function validateAuthCredentials() {
+  const credentials = authCredentials();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(credentials.email)) {
+    showAuthMessage("请输入正确的邮箱地址。");
+    elements.authEmailInput.focus();
+    return null;
+  }
+  if (credentials.password.length < 6) {
+    showAuthMessage("密码至少需要 6 位。");
+    elements.authPasswordInput.focus();
+    return null;
+  }
+  return credentials;
+}
+
+async function registerWithEmail() {
+  const credentials = validateAuthCredentials();
+  if (!credentials) return;
+  rememberSession = elements.rememberMeInput.checked;
+  setAuthBusy(true);
+  showAuthMessage("正在创建账号…", "info");
+  try {
+    const data = await supabaseRequest("/auth/v1/signup", {
+      method: "POST",
+      auth: false,
+      body: credentials
+    });
+    if (Array.isArray(data?.user?.identities) && data.user.identities.length === 0) {
+      showAuthMessage("这个邮箱已经注册过，请直接登录。");
+      return;
+    }
+    if (data.access_token) {
+      storeSession(data);
+      showAuthMessage();
+      renderAccountState();
+      await syncCloudData({ firstLogin: true });
+      showToast("注册成功，已为你登录。");
+    } else {
+      setAuthMode("login");
+      elements.authPasswordInput.value = "";
+      showToast("注册成功，请去邮箱点击验证链接，然后回来登录。");
+    }
+  } catch (error) {
+    showAuthMessage(authErrorMessage(error));
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function loginWithEmail() {
+  const credentials = validateAuthCredentials();
+  if (!credentials) return;
+  setAuthBusy(true);
+  showAuthMessage("正在登录并读取云端数据…", "info");
+  try {
+    const data = await supabaseRequest("/auth/v1/token?grant_type=password", {
+      method: "POST",
+      auth: false,
+      body: credentials
+    });
+    if (!data?.access_token) throw new Error("Missing auth session");
+    rememberSession = elements.rememberMeInput.checked;
+    storeSession(data);
+    showAuthMessage();
+    renderAccountState();
+    await syncCloudData({ firstLogin: true });
+    showToast("登录成功，云端数据已经同步。");
+  } catch (error) {
+    showAuthMessage(authErrorMessage(error));
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function logout() {
+  try {
+    if (authSession?.access_token) {
+      await supabaseRequest("/auth/v1/logout", { method: "POST" });
+    }
+  } catch {
+    // 即使网络离线，也允许清除本机登录状态。
+  }
+  storeSession(null);
+  clearTimeout(syncTimer);
+  elements.authPasswordInput.value = "";
+  renderAccountState();
+  showToast("已经退出登录。");
+}
+
+async function sendPasswordReset() {
+  const email = elements.authEmailInput.value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showAuthMessage("请输入正确的邮箱地址。");
+    elements.authEmailInput.focus();
+    return;
+  }
+  setAuthBusy(true);
+  showAuthMessage("正在发送密码重置邮件…", "info");
+  try {
+    await supabaseRequest("/auth/v1/recover", {
+      method: "POST",
+      auth: false,
+      body: { email }
+    });
+    showAuthMessage();
+    showToast("重置密码邮件已发送，请查收邮箱。");
+  } catch (error) {
+    showAuthMessage(authErrorMessage(error));
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+function profileFromCloud(row) {
+  const c = CLOUD_COLUMNS.profile;
+  return {
+    avatarType: row?.[c.avatarType] === "image" ? "image" : "emoji",
+    avatarValue: row?.[c.avatarValue] || defaultProfile.avatarValue,
+    coverType: row?.[c.coverType] === "image" ? "image" : "default",
+    coverValue: row?.[c.coverType] === "image" ? row?.[c.coverValue] : "default",
+    coverMode: ["cover", "contain", "blur"].includes(row?.[c.coverMode]) ? row[c.coverMode] : "cover",
+    title: row?.[c.title] || defaultProfile.title,
+    subtitle: row?.[c.subtitle] || defaultProfile.subtitle,
+    status: row?.[c.status] || defaultProfile.status
+  };
+}
+
+function emotionFromCloud(row) {
+  const c = CLOUD_COLUMNS.emotion;
+  return {
+    id: String(row?.[c.id]),
+    name: row?.[c.name],
+    iconType: row?.[c.iconType],
+    iconValue: row?.[c.iconValue]
+  };
+}
+
+function quoteFromCloud(row) {
+  const c = CLOUD_COLUMNS.quote;
+  const created = new Date(row?.[c.createdAt] || Date.now());
+  return {
+    id: String(row?.[c.id]),
+    text: String(row?.[c.text] || ""),
+    emotion: String(row?.[c.emotion] || defaultEmotions[0]),
+    tag: String(row?.[c.tag] || ""),
+    date: toDateString(created),
+    time: toTimeString(created),
+    favorite: Boolean(row?.[c.favorite])
+  };
+}
+
+function profileCloudPayload() {
+  const c = CLOUD_COLUMNS.profile;
+  return {
+    [c.user]: currentUser.id,
+    [c.title]: profile.title,
+    [c.subtitle]: profile.subtitle,
+    [c.status]: profile.status,
+    [c.avatarType]: profile.avatarType,
+    [c.avatarValue]: profile.avatarValue,
+    [c.coverType]: profile.coverType,
+    [c.coverValue]: profile.coverValue,
+    [c.coverMode]: profile.coverMode
+  };
+}
+
+function emotionCloudPayload(emotion) {
+  const c = CLOUD_COLUMNS.emotion;
+  return {
+    [c.user]: currentUser.id,
+    [c.name]: emotion.name,
+    [c.iconType]: emotion.iconType,
+    [c.iconValue]: emotion.iconValue
+  };
+}
+
+function quoteCloudPayload(quote) {
+  const c = CLOUD_COLUMNS.quote;
+  return {
+    [c.user]: currentUser.id,
+    [c.text]: quote.text,
+    [c.emotion]: quote.emotion,
+    [c.tag]: quote.tag || "",
+    [c.favorite]: Boolean(quote.favorite),
+    [c.createdAt]: new Date(`${quote.date}T${quote.time || "00:00"}:00`).toISOString()
+  };
+}
+
+async function tableRows(table) {
+  return await supabaseRequest(`/rest/v1/${table}?select=*`, {
+    headers: { Accept: "application/json" }
+  }) || [];
+}
+
+async function insertCloudRow(table, payload) {
+  const rows = await supabaseRequest(`/rest/v1/${table}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: payload
+  });
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
+async function updateCloudRow(table, idColumn, id, payload) {
+  return supabaseRequest(`/rest/v1/${table}?${encodeURIComponent(idColumn)}=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: payload
+  });
+}
+
+async function deleteCloudRow(table, idColumn, id) {
+  return supabaseRequest(`/rest/v1/${table}?${encodeURIComponent(idColumn)}=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" }
+  });
+}
+
+async function saveProfileToCloud() {
+  if (!currentUser) return;
+  const c = CLOUD_COLUMNS.profile;
+  await supabaseRequest(`/rest/v1/profiles?on_conflict=${encodeURIComponent(c.user)}`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: profileCloudPayload()
+  });
+}
+
+async function uploadPendingData() {
+  const quoteIdColumn = CLOUD_COLUMNS.quote.id;
+  const emotionIdColumn = CLOUD_COLUMNS.emotion.id;
+  for (const id of safeJSON(DELETED_QUOTES_KEY, [])) {
+    await deleteCloudRow("quotes", quoteIdColumn, id);
+  }
+  for (const id of safeJSON(DELETED_EMOTIONS_KEY, [])) {
+    await deleteCloudRow("emotions", emotionIdColumn, id);
+  }
+  localStorage.removeItem(DELETED_QUOTES_KEY);
+  localStorage.removeItem(DELETED_EMOTIONS_KEY);
+
+  for (const emotion of customEmotions.filter((item) => item._sync)) {
+    if (emotion._sync === "insert") {
+      const row = await insertCloudRow("emotions", emotionCloudPayload(emotion));
+      emotion.id = String(row?.[emotionIdColumn] ?? emotion.id);
+    } else {
+      await updateCloudRow("emotions", emotionIdColumn, emotion.id, emotionCloudPayload(emotion));
+    }
+    delete emotion._sync;
+  }
+  for (const quote of quotes.filter((item) => item._sync)) {
+    if (quote._sync === "insert") {
+      const row = await insertCloudRow("quotes", quoteCloudPayload(quote));
+      quote.id = String(row?.[quoteIdColumn] ?? quote.id);
+    } else {
+      await updateCloudRow("quotes", quoteIdColumn, quote.id, quoteCloudPayload(quote));
+    }
+    delete quote._sync;
+  }
+  saveQuotes();
+  saveEmotions();
+}
+
+async function flushPendingChanges() {
+  if (!currentUser) return true;
+  try {
+    await uploadPendingData();
+    renderAll();
+    return true;
+  } catch (error) {
+    console.error("Supabase 写入失败：", error);
+    showToast(`${cloudErrorMessage(error)} 已先保存在本机。`);
+    return false;
+  }
+}
+
+async function syncCloudData({ firstLogin = false, quiet = false } = {}) {
+  if (!currentUser || syncInProgress) return;
+  syncInProgress = true;
+  renderAccountState();
+  try {
+    await refreshSessionIfNeeded();
+    let [profileRows, emotionRows, quoteRows] = await Promise.all([
+      tableRows("profiles"),
+      tableRows("emotions"),
+      tableRows("quotes")
+    ]);
+
+    if (firstLogin && !emotionRows.length && customEmotions.length) {
+      customEmotions.forEach((item) => { item._sync = "insert"; });
+    }
+    if (firstLogin && !quoteRows.length && quotes.length) {
+      quotes.forEach((item) => { item._sync = "insert"; });
+    }
+    const hasPendingDeletes = safeJSON(DELETED_QUOTES_KEY, []).length || safeJSON(DELETED_EMOTIONS_KEY, []).length;
+    if (hasPendingDeletes || customEmotions.some((item) => item._sync) || quotes.some((item) => item._sync)) {
+      await uploadPendingData();
+      [emotionRows, quoteRows] = await Promise.all([tableRows("emotions"), tableRows("quotes")]);
+    }
+
+    const pendingEmotions = customEmotions.filter((item) => item._sync);
+    const pendingQuotes = quotes.filter((item) => item._sync);
+    if (profileRows.length) {
+      profile = profileFromCloud(profileRows[0]);
+    } else {
+      await saveProfileToCloud();
+    }
+    customEmotions = [
+      ...emotionRows.map(emotionFromCloud).filter((item) => item.name && !defaultEmotions.includes(item.name)),
+      ...pendingEmotions
+    ].filter((item, index, list) => list.findIndex((other) => other.name === item.name) === index);
+    quotes = [
+      ...quoteRows.map(quoteFromCloud).filter((item) => item.text),
+      ...pendingQuotes
+    ].filter((item, index, list) => list.findIndex((other) => String(other.id) === String(item.id)) === index)
+      .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+    profileDraft = { ...profile };
+    saveProfile();
+    saveEmotions();
+    saveQuotes();
+    renderProfile();
+    renderAll();
+    if (!quiet && !firstLogin) showToast("云端数据已经同步完成。");
+  } catch (error) {
+    if (!quiet) showToast(cloudErrorMessage(error));
+    console.error("Supabase 同步失败：", error);
+  } finally {
+    syncInProgress = false;
+    renderAccountState();
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncCloudData({ quiet: true }), 60000);
+  }
+}
+
+async function restoreAuthSession() {
+  const saved = safeJSON(AUTH_KEY, null) || (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(AUTH_KEY));
+    } catch {
+      return null;
+    }
+  })();
+  if (!saved?.refresh_token) {
+    renderAccountState();
+    return;
+  }
+  authSession = saved;
+  rememberSession = Boolean(localStorage.getItem(AUTH_KEY));
+  elements.rememberMeInput.checked = rememberSession;
+  currentUser = saved.user || null;
+  try {
+    await refreshSessionIfNeeded();
+    if (!currentUser && authSession?.access_token) {
+      currentUser = await supabaseRequest("/auth/v1/user");
+      authSession.user = currentUser;
+      storeSession(authSession);
+    }
+    renderAccountState();
+    await syncCloudData({ quiet: true });
+  } catch (error) {
+    console.error("恢复 Supabase 登录失败：", error);
+    storeSession(null);
+    renderAccountState();
   }
 }
 
@@ -320,7 +968,7 @@ function discardProfileDraft() {
 }
 
 function showEditQuoteView(id) {
-  const quote = quotes.find((item) => item.id === id);
+  const quote = quotes.find((item) => String(item.id) === String(id));
   if (!quote) return;
   editingQuoteId = id;
   editReturnView = currentView;
@@ -578,7 +1226,10 @@ async function handleSidebarCoverUpload(event) {
     const previousProfile = { ...profile };
     profile = { ...profile, coverType: "image", coverValue };
     if (!saveProfile()) profile = previousProfile;
-    else showToast("顶部个人空间封面已经更新啦。");
+    else if (currentUser) {
+      await saveProfileToCloud();
+      showToast("顶部封面已经更新并同步到云端。");
+    } else showToast("顶部个人空间封面已经更新啦。");
   } catch {
     showToast("封面图片读取失败，请换一张试试。");
   }
@@ -671,15 +1322,18 @@ function renderEmotionView() {
   if (!currentEmotion) return;
   const palette = paletteFor(currentEmotion);
   const emotionQuotes = quotes.filter((quote) => quote.emotion === currentEmotion);
+  const emotionLabel = currentEmotion.replace(/的宝子$/, "") || currentEmotion;
   elements.emotionView.style.setProperty("--mood-color", palette.color);
   elements.emotionView.style.setProperty("--mood-soft", palette.soft);
   elements.emotionViewMark.innerHTML = iconMarkup(palette.icon);
   elements.emotionViewTitle.textContent = currentEmotion;
   elements.emotionViewCount.textContent = emotionQuotes.length;
+  elements.emotionViewFavoriteCount.textContent = emotionQuotes.filter((quote) => quote.favorite).length;
   elements.emotionComposerHint.textContent = palette.hint;
-  elements.emotionPublishButton.textContent = `发布到${currentEmotion} ♡`;
+  elements.emotionQuoteInput.placeholder = `今天有什么${emotionLabel}的小瞬间想说呀`;
+  elements.emotionPublishButton.textContent = `发布到 ${currentEmotion} ♡`;
   elements.emotionFeedTitle.textContent = `${currentEmotion}语录`;
-  renderQuoteList(elements.emotionQuoteList, emotionQuotes, "这个情绪里还没有宝子语录。");
+  renderQuoteList(elements.emotionQuoteList, emotionQuotes, "这个情绪里还没有宝子语录。", true);
 }
 
 function renderAllQuotesView() {
@@ -809,6 +1463,29 @@ function quoteCard(quote) {
     </article>`;
 }
 
+function emotionQuoteCard(quote) {
+  const palette = paletteFor(quote.emotion);
+  const tags = String(quote.tag || "").split(/[,，、\s]+/).filter(Boolean);
+  const timeText = [quote.date, quote.time].filter(Boolean).join(" · ");
+  return `
+    <article class="emotion-detail-quote" style="${moodStyle(quote.emotion)}">
+      <span class="emotion-detail-icon">${iconMarkup(palette.icon)}</span>
+      <div class="emotion-detail-content">
+        <p>${escapeHTML(quote.text)}</p>
+        <div class="emotion-detail-meta">
+          ${tags.map((tag) => `<span class="tag"># ${escapeHTML(tag)}</span>`).join("")}
+          <time datetime="${escapeHTML(`${quote.date}T${quote.time || "00:00"}`)}">${escapeHTML(timeText)}</time>
+        </div>
+      </div>
+      <div class="emotion-detail-actions">
+        <button class="action-button ${quote.favorite ? "favorited" : ""}" data-favorite-id="${quote.id}" type="button"
+          aria-label="${quote.favorite ? "取消收藏" : "收藏"}">${quote.favorite ? "♥" : "♡"}</button>
+        <button class="action-button edit-button" data-edit-id="${quote.id}" type="button" aria-label="编辑">✎</button>
+        <button class="action-button delete-button" data-delete-id="${quote.id}" type="button" aria-label="删除">♙</button>
+      </div>
+    </article>`;
+}
+
 function renderEditPreview() {
   if (!elements.editPreviewText) return;
   const emotion = elements.editEmotionSelect.value || "宝子情绪";
@@ -818,9 +1495,9 @@ function renderEditPreview() {
   elements.editPreviewMeta.textContent = `${emotion}${tag ? ` · #${tag}` : ""}`;
 }
 
-function renderQuoteList(container, list, emptyMessage) {
+function renderQuoteList(container, list, emptyMessage, emotionDetail = false) {
   container.innerHTML = list.length
-    ? list.map(quoteCard).join("")
+    ? list.map(emotionDetail ? emotionQuoteCard : quoteCard).join("")
     : `<div class="empty-state"><span>♡</span>${emptyMessage}</div>`;
 }
 
@@ -858,17 +1535,18 @@ function renderAll() {
 function createQuote(text, emotion, tag) {
   const now = new Date();
   return {
-    id: Date.now(),
+    id: `local-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
     text,
     emotion,
     tag,
     date: toDateString(now),
     time: toTimeString(now),
-    favorite: false
+    favorite: false,
+    _sync: "insert"
   };
 }
 
-function addQuote() {
+async function addQuote() {
   const text = elements.emotionQuoteInput.value.trim();
   if (!text) {
     showToast("请输入想记录的宝子语录。");
@@ -885,10 +1563,11 @@ function addQuote() {
   elements.emotionTagInput.value = "";
   updateCharCount("emotion");
   renderEmotionView();
-  showToast("宝子语录已经发布成功啦。");
+  const synced = await flushPendingChanges();
+  showToast(synced && currentUser ? "宝子语录已发布并同步到云端。" : "宝子语录已经发布成功啦。");
 }
 
-function addQuoteFromNewView() {
+async function addQuoteFromNewView() {
   const text = elements.newQuoteInput.value.trim();
   if (!text) {
     showToast("请输入想记录的宝子语录。");
@@ -906,11 +1585,12 @@ function addQuoteFromNewView() {
   elements.newQuoteTagInput.value = "";
   updateCharCount("newQuote");
   showEmotionView(emotion);
-  showToast("宝子语录已经发布成功啦。");
+  const synced = await flushPendingChanges();
+  showToast(synced && currentUser ? "宝子语录已发布并同步到云端。" : "宝子语录已经发布成功啦。");
 }
 
-function saveEditedQuote() {
-  const quote = quotes.find((item) => item.id === editingQuoteId);
+async function saveEditedQuote() {
+  const quote = quotes.find((item) => String(item.id) === String(editingQuoteId));
   const text = elements.editQuoteInput.value.trim();
   if (!quote || !text) {
     showToast("语录内容不能为空哦。");
@@ -921,13 +1601,15 @@ function saveEditedQuote() {
   quote.text = text;
   quote.tag = elements.editTagInput.value.trim();
   quote.emotion = elements.editEmotionSelect.value;
+  if (quote._sync !== "insert") quote._sync = "update";
   if (!saveQuotes()) {
     Object.assign(quote, previousQuote);
     return;
   }
   const updatedEmotion = quote.emotion;
   editingQuoteId = null;
-  showToast("宝子语录已经修改好啦。");
+  const synced = await flushPendingChanges();
+  showToast(synced && currentUser ? "修改已同步到云端。" : "宝子语录已经修改好啦。");
   returnFromEdit(updatedEmotion);
 }
 
@@ -937,32 +1619,37 @@ function deleteQuote(id) {
     message: "删除后就不能恢复啦。",
     confirmText: "确定删除",
     cancelText: "取消",
-    onConfirm: () => {
+    onConfirm: async () => {
       const previousQuotes = quotes;
-      quotes = quotes.filter((quote) => quote.id !== id);
+      const removed = quotes.find((quote) => String(quote.id) === String(id));
+      quotes = quotes.filter((quote) => String(quote.id) !== String(id));
       if (!saveQuotes()) {
         quotes = previousQuotes;
         return;
       }
+      saveDeletedId(DELETED_QUOTES_KEY, removed?.id);
+      await flushPendingChanges();
       renderAll();
       showToast("宝子语录已经删除。");
     }
   });
 }
 
-function toggleFavorite(id) {
-  const quote = quotes.find((item) => item.id === id);
+async function toggleFavorite(id) {
+  const quote = quotes.find((item) => String(item.id) === String(id));
   if (!quote) return;
   quote.favorite = !quote.favorite;
+  if (quote._sync !== "insert") quote._sync = "update";
   if (!saveQuotes()) {
     quote.favorite = !quote.favorite;
     return;
   }
+  await flushPendingChanges();
   renderAll();
   showToast(quote.favorite ? "已加入收藏。" : "已取消收藏。");
 }
 
-function addCustomEmotion() {
+async function addCustomEmotion() {
   const name = elements.customEmotionInput.value.trim();
   if (!name) {
     showToast("请输入新的宝子情绪名称。");
@@ -977,7 +1664,12 @@ function addCustomEmotion() {
   const icon = customIconImage
     ? { iconType: "image", iconValue: customIconImage }
     : { iconType: "emoji", iconValue: customSymbol || selectedCustomEmoji };
-  customEmotions.push({ name, ...icon });
+  customEmotions.push({
+    id: `local-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`,
+    name,
+    ...icon,
+    _sync: "insert"
+  });
   if (!saveEmotions()) {
     customEmotions.pop();
     return;
@@ -986,12 +1678,13 @@ function addCustomEmotion() {
   elements.customIconInput.value = "";
   customIconImage = "";
   elements.customIconPreview.textContent = "未选择图片";
+  await flushPendingChanges();
   renderHome();
   if (window.matchMedia("(max-width: 600px)").matches) setMobileEmotionPanel(false);
   showToast("新的宝子情绪添加成功。");
 }
 
-function saveProfileSettings() {
+async function saveProfileSettings() {
   const title = elements.profileTitleInput.value.trim();
   const subtitle = elements.profileSubtitleInput.value.trim();
   const status = elements.profileStatusInput.value.trim();
@@ -1007,7 +1700,17 @@ function saveProfileSettings() {
     subtitle: subtitle || defaultProfile.subtitle,
     status: status || defaultProfile.status
   };
-  if (saveProfile(true)) {
+  if (saveProfile(false)) {
+    if (currentUser) {
+      try {
+        await saveProfileToCloud();
+        showToast("个人空间资料已保存并同步到云端。");
+      } catch (error) {
+        showToast(`${cloudErrorMessage(error)} 资料已先保存在本机。`);
+      }
+    } else {
+      showToast("个人空间资料已经保存好啦。");
+    }
     showHomeView();
   } else {
     profile = previousProfile;
@@ -1024,13 +1727,16 @@ function deleteCustomEmotion(emotion) {
     message: "删除后，这个情绪分类会从首页消失，但以前保存的语录不会丢失。",
     confirmText: "确定删除",
     cancelText: "取消",
-    onConfirm: () => {
+    onConfirm: async () => {
       const previousEmotions = customEmotions;
+      const removed = customEmotions.find((item) => item.name === emotion);
       customEmotions = customEmotions.filter((item) => item.name !== emotion);
       if (!saveEmotions()) {
         customEmotions = previousEmotions;
         return;
       }
+      saveDeletedId(DELETED_EMOTIONS_KEY, removed?.id);
+      await flushPendingChanges();
       renderHome();
       showToast("自定义情绪已经删除，旧语录会继续保留。");
     }
@@ -1111,12 +1817,61 @@ function handleQuoteListClick(event) {
   const favoriteButton = event.target.closest("[data-favorite-id]");
   const editButton = event.target.closest("[data-edit-id]");
   const deleteButton = event.target.closest("[data-delete-id]");
-  if (favoriteButton) toggleFavorite(Number(favoriteButton.dataset.favoriteId));
-  if (editButton) showEditQuoteView(Number(editButton.dataset.editId));
-  if (deleteButton) deleteQuote(Number(deleteButton.dataset.deleteId));
+  if (favoriteButton) toggleFavorite(favoriteButton.dataset.favoriteId);
+  if (editButton) showEditQuoteView(editButton.dataset.editId);
+  if (deleteButton) deleteQuote(deleteButton.dataset.deleteId);
 }
 
 function bindEvents() {
+  elements.welcomeStartButton.addEventListener("click", async () => {
+    elements.welcomeStartButton.disabled = true;
+    try {
+      if (authRestorePromise) await authRestorePromise;
+      if (currentUser && authSession?.access_token) showAuthenticatedHome();
+      else openAuthDialog();
+    } finally {
+      elements.welcomeStartButton.disabled = false;
+    }
+  });
+  elements.welcomeLoginButton.addEventListener("click", async () => {
+    elements.welcomeLoginButton.disabled = true;
+    try {
+      if (authRestorePromise) await authRestorePromise;
+      openAuthDialog();
+    } finally {
+      elements.welcomeLoginButton.disabled = false;
+    }
+  });
+  elements.accountButton.addEventListener("click", () => {
+    if (currentUser) syncCloudData();
+    else openAuthDialog();
+  });
+  elements.profileLoginButton.addEventListener("click", openAuthDialog);
+  elements.profileSyncButton.addEventListener("click", () => syncCloudData());
+  elements.profileLogoutButton.addEventListener("click", () => {
+    showCustomConfirm({
+      title: "确定要退出登录吗？",
+      message: "退出后本机数据会保留，但暂停云端同步。",
+      confirmText: "退出登录",
+      cancelText: "取消",
+      onConfirm: logout
+    });
+  });
+  elements.registerButton.addEventListener("click", () => {
+    setAuthMode(authMode === "login" ? "register" : "login");
+  });
+  elements.loginButton.addEventListener("click", () => {
+    if (authMode === "register") registerWithEmail();
+    else loginWithEmail();
+  });
+  elements.passwordToggleButton.addEventListener("click", togglePasswordVisibility);
+  elements.forgotPasswordButton.addEventListener("click", sendPasswordReset);
+  elements.authPasswordInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      if (authMode === "register") registerWithEmail();
+      else loginWithEmail();
+    }
+  });
   elements.homeLogoButton.addEventListener("click", showHomeView);
   elements.sidebarEditProfileButton.addEventListener("click", showProfileSettingsView);
   document.querySelectorAll("[data-back-home]").forEach((button) => button.addEventListener("click", showHomeView));
@@ -1174,7 +1929,13 @@ function bindEvents() {
   elements.resetSidebarCoverButton.addEventListener("click", () => {
     const previousProfile = { ...profile };
     profile = { ...profile, coverType: "default", coverValue: "default", coverMode: "cover" };
-    if (saveProfile()) showToast("已经恢复默认顶部封面。");
+    if (saveProfile()) {
+      if (currentUser) {
+        saveProfileToCloud()
+          .then(() => showToast("默认封面已同步到云端。"))
+          .catch((error) => showToast(`${cloudErrorMessage(error)} 封面已先保存在本机。`));
+      } else showToast("已经恢复默认顶部封面。");
+    }
     else profile = previousProfile;
   });
   elements.profileTitleInput.addEventListener("input", () => {
@@ -1297,7 +2058,7 @@ function bindEvents() {
     .forEach((list) => list.addEventListener("click", handleQuoteListClick));
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   cacheElements();
   loadData();
   loadProfile();
@@ -1308,6 +2069,18 @@ document.addEventListener("DOMContentLoaded", () => {
   updateCharCount("newQuote");
   updateCharCount("edit");
   setActiveView("home");
+  showWelcomeView();
+  renderAccountState();
+  authRestorePromise = restoreAuthSession();
+  await authRestorePromise;
+});
+
+window.addEventListener("focus", () => {
+  if (currentUser) syncCloudData({ quiet: true });
+});
+
+window.addEventListener("online", () => {
+  if (currentUser) syncCloudData();
 });
 
 if ("serviceWorker" in navigator) {
